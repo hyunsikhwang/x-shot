@@ -113,6 +113,22 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
             color_scheme=theme,
             locale="ko-KR",
         )
+        async def bypass_document_csp(route):
+            request = route.request
+            if request.resource_type == "document" and "x.com/" in request.url:
+                response = await route.fetch()
+                headers = {
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower()
+                    not in {"content-security-policy", "content-security-policy-report-only"}
+                }
+                body = await response.body()
+                await route.fulfill(response=response, headers=headers, body=body)
+                return
+            await route.continue_()
+
+        await context.route("**/*", bypass_document_csp)
         page = await context.new_page()
 
         try:
@@ -138,17 +154,30 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
                 except Exception:
                     continue
 
-            await page.add_style_tag(
-                content=f"""
-                @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-                html, body {{
-                  background: {page_color} !important;
-                }}
-                article, article * {{
-                  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-                }}
-                """
-            )
+            try:
+                await page.add_style_tag(
+                    content=f"""
+                    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+                    html, body {{
+                      background: {page_color} !important;
+                    }}
+                    article, article * {{
+                      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                    }}
+                    """
+                )
+            except Exception:
+                # CSP 우회가 환경별로 동작하지 않을 때도 캡처는 계속 진행한다.
+                await page.add_style_tag(
+                    content=f"""
+                    html, body {{
+                      background: {page_color} !important;
+                    }}
+                    article, article * {{
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                    }}
+                    """
+                )
 
             tweet = page.locator(f"article:has(a[href*='/status/{tweet_id}'])").first
             try:
