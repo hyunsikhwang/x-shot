@@ -2,7 +2,7 @@ import asyncio
 import re
 import subprocess
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import nest_asyncio
 import streamlit as st
@@ -74,50 +74,7 @@ def ensure_playwright_browser() -> str:
 
 
 async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> bytes:
-    bg_color = "#f3f5f7" if theme == "light" else "#0f1115"
-    page_color = "#f3f5f7" if theme == "light" else "#0f1115"
-
-    html = f"""
-<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      html, body {{
-        margin: 0;
-        padding: 0;
-        background: {page_color};
-      }}
-      #capture-card {{
-        width: 860px;
-        margin: 36px auto;
-        padding: 28px;
-        border-radius: 20px;
-        background: {bg_color};
-        box-sizing: border-box;
-      }}
-      #tweet-wrap {{
-        width: 100%;
-        min-height: 220px;
-      }}
-      .hint {{
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        color: #6b7280;
-        font-size: 13px;
-        margin-top: 10px;
-      }}
-    </style>
-    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-  </head>
-  <body>
-    <div id="capture-card">
-      <div id="tweet-wrap"></div>
-      <div class="hint">Generated with x-shot</div>
-    </div>
-  </body>
-</html>
-"""
+    page_color = "#ffffff" if theme == "light" else "#0f1115"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -132,39 +89,42 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
         page = await context.new_page()
 
         try:
-            await page.set_content(html, wait_until="domcontentloaded")
             tweet_id = extract_post_id(post_url)
             if not tweet_id:
                 raise ValueError("게시물 ID를 추출할 수 없습니다.")
 
-            await page.wait_for_function(
-                "() => !!(window.twttr && window.twttr.widgets)",
-                timeout=20000,
+            query = urlencode(
+                {
+                    "id": tweet_id,
+                    "theme": theme,
+                    "conversation": "none",
+                    "dnt": "true",
+                    "align": "center",
+                }
             )
-            await page.evaluate(
-                """async ({ tweetId, theme }) => {
-                    const host = document.getElementById("tweet-wrap");
-                    if (!host) {
-                      throw new Error("tweet-wrap 요소를 찾을 수 없습니다.");
-                    }
-                    host.innerHTML = "";
-                    await window.twttr.widgets.createTweet(tweetId, host, {
-                      theme,
-                      dnt: true,
-                      conversation: "none",
-                      align: "center"
-                    });
-                }""",
-                {"tweetId": tweet_id, "theme": theme},
+            embed_url = f"https://platform.twitter.com/embed/Tweet.html?{query}"
+            await page.goto(embed_url, wait_until="domcontentloaded", timeout=30000)
+            await page.add_style_tag(
+                content=f"""
+                @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+                html, body {{
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  background: {page_color} !important;
+                }}
+                .twitter-tweet, .twitter-tweet * {{
+                  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                }}
+                """
             )
-            await page.wait_for_selector("#tweet-wrap iframe", timeout=30000)
+            await page.wait_for_selector(".twitter-tweet", timeout=30000)
 
-            iframe = page.locator("#tweet-wrap iframe").first
+            tweet = page.locator(".twitter-tweet").first
             stable = 0
             prev_h = -1
 
             for _ in range(24):
-                box = await iframe.bounding_box()
+                box = await tweet.bounding_box()
                 if box and box.get("height", 0) > 160:
                     curr_h = int(box["height"])
                     if abs(curr_h - prev_h) <= 1:
@@ -176,8 +136,8 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
                         break
                 await page.wait_for_timeout(250)
 
-            await page.wait_for_timeout(500)
-            image_bytes = await page.locator("#capture-card").screenshot(type="png")
+            await page.wait_for_timeout(700)
+            image_bytes = await tweet.screenshot(type="png")
             return image_bytes
         finally:
             await browser.close()
