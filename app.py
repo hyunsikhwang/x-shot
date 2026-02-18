@@ -2,7 +2,7 @@ import asyncio
 import re
 import subprocess
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import nest_asyncio
 import streamlit as st
@@ -61,6 +61,18 @@ def extract_post_id(post_url: str) -> Optional[str]:
     if re.fullmatch(r"\d+", post_id):
         return post_id
     return None
+
+
+def build_x_repost_intent_url(post_id: str) -> str:
+    return f"https://x.com/intent/retweet?tweet_id={post_id}"
+
+
+def build_x_quote_intent_url(post_url: str) -> str:
+    text = "스크린샷과 함께 공유합니다."
+    return (
+        "https://x.com/intent/tweet"
+        f"?text={quote(text)}&url={quote(post_url, safe='')}"
+    )
 
 
 @st.cache_resource
@@ -258,6 +270,20 @@ if st.button("스크린샷 생성", use_container_width=True):
                     file_name=f"x-post-{post_id}.png",
                     mime="image/png",
                     use_container_width=True,
+                )
+                st.link_button(
+                    "🔁 X에서 즉시 Repost",
+                    build_x_repost_intent_url(post_id),
+                    use_container_width=True,
+                )
+                st.link_button(
+                    "✍️ 스크린샷+링크 공유 작성",
+                    build_x_quote_intent_url(normalized),
+                    use_container_width=True,
+                )
+                st.caption(
+                    "참고: X 웹 intent 특성상 스크린샷 이미지는 자동 첨부되지 않으므로,"
+                    " 공유 작성 화면에서 이미지를 직접 추가해 주세요."
                 )
             except PlaywrightTimeoutError:
                 st.error("렌더링 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.")
