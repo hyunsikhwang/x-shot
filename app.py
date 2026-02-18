@@ -2,7 +2,7 @@ import asyncio
 import re
 import subprocess
 from typing import Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
 import nest_asyncio
 import streamlit as st
@@ -76,15 +76,42 @@ def ensure_playwright_browser() -> str:
 async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> bytes:
     page_color = "#ffffff" if theme == "light" else "#0f1115"
 
+    async def expand_show_more(article_locator) -> None:
+        selectors = [
+            "div[role='button']:has-text('Show more')",
+            "span:has-text('Show more')",
+            "div[role='button']:has-text('더 보기')",
+            "span:has-text('더 보기')",
+            "div[role='button']:has-text('더보기')",
+            "span:has-text('더보기')",
+        ]
+        for _ in range(8):
+            clicked = False
+            for selector in selectors:
+                targets = article_locator.locator(selector)
+                count = await targets.count()
+                for idx in range(min(count, 6)):
+                    node = targets.nth(idx)
+                    try:
+                        if await node.is_visible(timeout=200):
+                            await node.click(timeout=2000)
+                            await asyncio.sleep(0.15)
+                            clicked = True
+                    except Exception:
+                        continue
+            if not clicked:
+                break
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
         context = await browser.new_context(
-            viewport={"width": 1200, "height": 2400},
+            viewport={"width": 1280, "height": 2400},
             device_scale_factor=2,
             color_scheme=theme,
+            locale="ko-KR",
         )
         page = await context.new_page()
 
@@ -93,40 +120,63 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
             if not tweet_id:
                 raise ValueError("게시물 ID를 추출할 수 없습니다.")
 
-            query = urlencode(
-                {
-                    "id": tweet_id,
-                    "theme": theme,
-                    "conversation": "none",
-                    "dnt": "true",
-                    "align": "center",
-                }
-            )
-            embed_url = f"https://platform.twitter.com/embed/Tweet.html?{query}"
-            await page.goto(embed_url, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(800)
+
+            dismiss_selectors = [
+                "button:has-text('Not now')",
+                "button:has-text('나중에')",
+                "button[aria-label='닫기']",
+                "div[role='button'][aria-label='닫기']",
+            ]
+            for selector in dismiss_selectors:
+                btn = page.locator(selector).first
+                try:
+                    if await btn.is_visible(timeout=500):
+                        await btn.click(timeout=2000)
+                        await page.wait_for_timeout(200)
+                except Exception:
+                    continue
+
             await page.add_style_tag(
                 content=f"""
                 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
                 html, body {{
-                  margin: 0 !important;
-                  padding: 0 !important;
                   background: {page_color} !important;
                 }}
-                .twitter-tweet, .twitter-tweet * {{
+                article, article * {{
                   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
                 }}
                 """
             )
-            await page.wait_for_selector(".twitter-tweet", timeout=30000)
 
-            tweet = page.locator(".twitter-tweet").first
+            tweet = page.locator(f"article:has(a[href*='/status/{tweet_id}'])").first
+            try:
+                await tweet.wait_for(timeout=30000)
+            except Exception:
+                # fallback: 상세 페이지에서 첫 번째 article
+                tweet = page.locator("article").first
+                await tweet.wait_for(timeout=30000)
+
+            await expand_show_more(tweet)
+            await tweet.scroll_into_view_if_needed(timeout=3000)
+            await page.wait_for_timeout(500)
+
+            box = await tweet.bounding_box()
+            if box and box.get("height", 0) > 0:
+                desired_h = int(box["height"]) + 240
+                adjusted_h = max(1600, min(desired_h, 14000))
+                await page.set_viewport_size({"width": 1280, "height": adjusted_h})
+                await page.wait_for_timeout(400)
+                await tweet.scroll_into_view_if_needed(timeout=3000)
+
             stable = 0
             prev_h = -1
 
-            for _ in range(24):
-                box = await tweet.bounding_box()
-                if box and box.get("height", 0) > 160:
-                    curr_h = int(box["height"])
+            for _ in range(36):
+                cur_box = await tweet.bounding_box()
+                if cur_box and cur_box.get("height", 0) > 160:
+                    curr_h = int(cur_box["height"])
                     if abs(curr_h - prev_h) <= 1:
                         stable += 1
                     else:
@@ -136,7 +186,7 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
                         break
                 await page.wait_for_timeout(250)
 
-            await page.wait_for_timeout(700)
+            await page.wait_for_timeout(800)
             image_bytes = await tweet.screenshot(type="png")
             return image_bytes
         finally:
