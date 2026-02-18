@@ -53,6 +53,16 @@ def normalize_x_post_url(url: str) -> Optional[str]:
     return f"https://x.com/{username}/status/{post_id}"
 
 
+def extract_post_id(post_url: str) -> Optional[str]:
+    parts = [part for part in post_url.rstrip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    post_id = parts[-1]
+    if re.fullmatch(r"\d+", post_id):
+        return post_id
+    return None
+
+
 @st.cache_resource
 def ensure_playwright_browser() -> str:
     cmd = ["playwright", "install", "chromium"]
@@ -89,6 +99,7 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
       }}
       #tweet-wrap {{
         width: 100%;
+        min-height: 220px;
       }}
       .hint {{
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -101,16 +112,7 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
   </head>
   <body>
     <div id="capture-card">
-      <blockquote
-        id="tweet-wrap"
-        class="twitter-tweet"
-        data-theme="{theme}"
-        data-dnt="true"
-        data-conversation="none"
-        data-align="center"
-      >
-        <a href="{post_url}"></a>
-      </blockquote>
+      <div id="tweet-wrap"></div>
       <div class="hint">Generated with x-shot</div>
     </div>
   </body>
@@ -131,7 +133,31 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
 
         try:
             await page.set_content(html, wait_until="domcontentloaded")
-            await page.wait_for_selector("#tweet-wrap iframe", timeout=20000)
+            tweet_id = extract_post_id(post_url)
+            if not tweet_id:
+                raise ValueError("게시물 ID를 추출할 수 없습니다.")
+
+            await page.wait_for_function(
+                "() => !!(window.twttr && window.twttr.widgets)",
+                timeout=20000,
+            )
+            await page.evaluate(
+                """async ({ tweetId, theme }) => {
+                    const host = document.getElementById("tweet-wrap");
+                    if (!host) {
+                      throw new Error("tweet-wrap 요소를 찾을 수 없습니다.");
+                    }
+                    host.innerHTML = "";
+                    await window.twttr.widgets.createTweet(tweetId, host, {
+                      theme,
+                      dnt: true,
+                      conversation: "none",
+                      align: "center"
+                    });
+                }""",
+                {"tweetId": tweet_id, "theme": theme},
+            )
+            await page.wait_for_selector("#tweet-wrap iframe", timeout=30000)
 
             iframe = page.locator("#tweet-wrap iframe").first
             stable = 0
