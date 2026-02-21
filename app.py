@@ -170,11 +170,12 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
                 await page.add_style_tag(
                     content=f"""
                     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
                     html, body {{
                       background: {page_color} !important;
                     }}
                     article, article * {{
-                      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                      font-family: 'Pretendard', 'Noto Sans KR', 'Noto Sans SC', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif !important;
                     }}
                     """
                 )
@@ -186,7 +187,7 @@ async def _capture_x_post_png_async(post_url: str, theme: str = "light") -> byte
                       background: {page_color} !important;
                     }}
                     article, article * {{
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                      font-family: 'Noto Sans KR', 'Noto Sans SC', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif !important;
                     }}
                     """
                 )
